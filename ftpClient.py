@@ -10,6 +10,9 @@ class FTPClient:
         self.password = password
 
         self.ftp = FTP()
+
+    def __del__(self):
+        self.disconnect()
  
     def _checkConnection(func):
         def wrapper(self, *args, **kwargs):
@@ -36,6 +39,18 @@ class FTPClient:
         self.connected = True
         print("Connected.")
         return True
+
+    @_checkConnection
+    def disconnect(self)
+        if self.ftp is not None:
+            try:
+                self.ftp.quit()
+            except Exception as e:
+                print(f"Failed to close the FTP connection{e}")
+                self.ftp.close()
+        
+        self.ftp = None
+
 
     @_checkConnection
     def disconnect(self):
@@ -103,7 +118,7 @@ class FTPClient:
         try:
             content = self.getDirectoryContent(path)
 
-            for name, details in content:
+            for name, details in content.items():
                 if details["type"] == "dir":
                     self.removeDirectory(os.path.join(path, name))
                 elif details["type"] == "file":
