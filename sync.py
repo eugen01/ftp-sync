@@ -6,14 +6,24 @@ from hash import hashFilePartial, hashFile
 from io import BytesIO
 
 class Sync:
-    def __init__(self, ftpClient):
-        
+    def __init__(self, ftpClient, delete = False, update = True, strictMatch = False):
         self.ftpClient = ftpClient
+        self.delete = delete
+        self.update = update
+        self.strictMatch = strictMatch
 
-
+    '''
+        Syncs the content of a local folder to a folder on the FTP server
+    '''
     def syncCurrentFolder(self, local, remote):
-        
+
+        success = True
+
         remoteEntries = self.ftpClient.getDirectoryContent(remote)
+
+        if remoteEntries is None:
+            self.ftpClient.createDirectory(remote)
+            remoteEntries = {}
 
         localEntries = os.scandir(local)
 
@@ -23,14 +33,26 @@ class Sync:
                 # local entry is a directory, recursively sync its contents
                 if localEntry.name in remoteEntries:
                     if remoteEntries[localEntry.name]['type'] != 'dir':
-                        # For some reason, a file with the same name as this directory 
-                        self.ftpClient.removeFile(os.path.join(remote, localEntry.name))
+                        # For some reason, there is a file with the same name as this directory
+                        if False == self.ftpClient.removeFile(os.path.join(remote, localEntry.name)):
+                            print(f"Remote directory {localEntry.name} could not be deleted")
+                            success = False
+                            continue
                 else:
-                    self.ftpClient.createDirectory(os.path.join(remote, localEntry.name))
+                    if False == self.ftpClient.createDirectory(os.path.join(remote, localEntry.name)):
+                        print(f"Remote directory {localEntry.name} could not be created")
+                        success = False
+                        continue
 
-                self.syncCurrentFolder(localEntry.path, os.path.join(remote, localEntry.name))
+                    # Create a record in 'remoteEntries' for consistency
+                    remoteEntries[localEntry.name] = {'type' : 'dir', 'sizd': '', 'modify': '', 'unix.mode': ''}
 
-                #TODO - mark directory as synced in the list of remote entries
+                success = (success and self.syncCurrentFolder(localEntry.path, os.path.join(remote, localEntry.name)))
+
+                # For safety, mark the remote folder as "DO NOT DELETE" even if the sync failed
+                if self.delete:
+                    remoteEntries[localEntry.name]['Synced'] = True
+
             else:
                 #local entry is a file, not a directory
 
@@ -39,45 +61,99 @@ class Sync:
                         # A directory with this name already exists
                         self.ftpClient.removeDirectory(remoteEntries[localEntry.name])
 
-                self.syncCurrentFile(localEntry.path, remote, remoteEntries)
+                success = (success and self.syncCurrentFile(localEntry.path, remote, remoteEntries))
 
-                #TODO - mark the file, and its hash file as synced in the list of remote entries
-        
+        if not self.delete:
+            return success
+
         # remove all unsynced files and directories
+        for remoteName, details in remoteEntries.items():
+            if not details.get('Synced'):
+                if details['type'] == 'dir':
+                    self.ftpClient.removeDirectory(os.path.join(remote, remoteName))
+                elif details['type'] == 'file':
+                    self.ftpClient.removeFile(os.path.join(remote, remoteName))
 
-    def syncCurrentFile(self, local, remotePath, folderContents):
-        
-        file = open(local, 'rb')
-        hashValue = hashFilePartial(file)
+        return success
 
-        
+
+    '''
+        Syncs a local file to a remote directory
+        Can be called with an existing listing of the remote directory
+        or independently to sync just one file.
+        Returns true if the file was synced successfully, false otherwise
+    '''
+    def syncCurrentFile(self, local, remotePath, folderContents = {}):
+
+        success = True
+
+        if not folderContents:
+            folderContents = self.ftpClient.getDirectoryContent(remotePath)
+
+        if folderContents is None:
+            return False
+
+        try:
+            file = open(local, 'rb')
+        except Exception as e:
+            print(f"Could not open {local} for reading: {e}")
+            return False
+
+        hashValue = ''
+        if self.update:
+            hashValue = hashFilePartial(file) if self.strictMatch else hashFile(file)
+
         fileName = os.path.basename(local)
-        hashName = "." + fileName
+        hashName = "." + fileName + ".hash"
 
-        if fileName in folderContents:
-            if hashName in folderContents:
+        fileAlreadyExists = True if fileName in folderContents else False
+        hashAlreadyExists = True if self.update and hashName in folderContents else False
+
+        if fileAlreadyExists:
+            if hashAlreadyExists:
                 remoteFile = self.ftpClient.readFile(os.path.join(remotePath, hashName))
 
                 if remoteFile is None:
                     print(f"Failed to read hash file for {local}")
                 elif remoteFile.content.decode("utf-8") == hashValue:
                     print(f"File {local} already synced")
+                    folderContents[fileName]['Synced'] = True
+                    folderContents[hashName]['Synced'] = True
                     file.close()
-                    return
-                
+                    return True
+
                 # remove the Hash file. It will be rewritten
-                self.ftpClient.removeFile(os.path.join(remotePath, hashName))
+                success = self.ftpClient.removeFile(os.path.join(remotePath, hashName))
 
             # remove the file. It will be rewritten.
-            self.ftpClient.removeFile(os.path.join(remotePath, fileName))
+            success = (success and self.ftpClient.removeFile(os.path.join(remotePath, fileName)))
 
         file.seek(0)
 
-        self.ftpClient.transferFile(file, os.path.join(remotePath, fileName))
+        if not self.ftpClient.transferFile(file, os.path.join(remotePath, fileName)):
+            success = False
+        elif not fileAlreadyExists:
+            # File was uploaded, update 'folderContents' with a dummy entry
+            folderContents[fileName] = {'Synced': True, 'type': 'file', 'size': '', 'modify': '',\
+                                         'unix.mode': '', 'unix.uid': '', 'unix.gid': '', 'unique': ''}
+        else:
+            folderContents[fileName]['Synced'] = True
+
+
         file.close()
 
-        # now write the hash file
-        hashFileBuffer = BytesIO(hashValue.encode("utf-8"))
-        self.ftpClient.transferFile(hashFileBuffer, os.path.join(remotePath, hashName))
-        
-        hashFileBuffer.close()
+        if self.update:
+            # now write the hash file.
+            hashFileBuffer = BytesIO(hashValue.encode("utf-8"))
+            if not self.ftpClient.transferFile(hashFileBuffer, os.path.join(remotePath, hashName)):
+                print(f"File {local} synced, but hash file could not be created")
+                success = False
+            elif not hashAlreadyExists:
+                folderContents[hashName] = {'Synced': True, 'type': 'file', 'size': '', 'modify': '',\
+                                         'unix.mode': '', 'unix.uid': '', 'unix.gid': '', 'unique': ''}
+            else:
+                folderContents[hashName]['Synced'] = True
+
+            hashFileBuffer.close()
+
+        return success

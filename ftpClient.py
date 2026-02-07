@@ -1,5 +1,5 @@
 
-from ftplib import FTP
+from ftplib import FTP, error_perm
 
 class FTPClient:
     def __init__(self, host, user, password, port=21):
@@ -13,7 +13,7 @@ class FTPClient:
 
     def __del__(self):
         self.disconnect()
- 
+
     def _checkConnection(func):
         def wrapper(self, *args, **kwargs):
             if not self.connected:
@@ -41,31 +41,21 @@ class FTPClient:
         return True
 
     @_checkConnection
-    def disconnect(self)
+    def disconnect(self):
         if self.ftp is not None:
             try:
                 self.ftp.quit()
             except Exception as e:
                 print(f"Failed to close the FTP connection{e}")
                 self.ftp.close()
-        
+
+        self.connected = False
         self.ftp = None
-
-
-    @_checkConnection
-    def disconnect(self):
-        if self.connected:
-            print("Disconnecting from FTP server...")
-            self.ftp.quit()
-            self.connected = False
-            print("Disconnected.")
-        else:
-            print("Not connected to any FTP server.")
 
     @_checkConnection
     def getDirectoryContent(self, path):
 
-        print("Retrieving directory content...")
+        print(f"Retrieving directory content {path}")
         try:
 
             files = self.ftp.mlsd(path)
@@ -77,16 +67,16 @@ class FTPClient:
     @_checkConnection
     def getDirectoryNames(self):
 
-        print ("Retrieving directory content...")
+        print (f"Retrieving directory names {path}")
 
         try:
-            names = self.ftp.nlst()
+            names = self.ftp.nlst(path)
             return names
         except Exception as e:
             print(f"Failed to retrieve directory content: {e}")
             return None
 
-    @_checkConnection 
+    @_checkConnection
     def removeFile(self, path):
 
         print (f"Removing {path} from FTP filesystem")
@@ -100,10 +90,31 @@ class FTPClient:
         return False
 
     @_checkConnection
-    def createDirectory(self, path):
-        
+    def createDirectory(self, path, makeParents = True):
+
+        if path == "/" :
+            print(f"Will not create root directory{path}")
+            return False
+
+        print (f"Creating directory {path}")
         try:
             self.ftp.mkd(path)
+        except error_perm as permError:
+            if str(permError).startswith("550") and True == makeParents:
+                import os
+                head, tail = os.path.split(path)
+                if not tail:
+                    head = os.path.dirname(head)
+
+                if True == self.createDirectory(head, True):
+                    return self.createDirectory(path, False)
+                else:
+                    return False
+
+            else:
+                print (f"Failed to create directory {path}: {e}")
+                return False
+
         except Exception as e:
             print (f"Failed to create directory {path}: {e}")
             return False
@@ -114,6 +125,7 @@ class FTPClient:
     @_checkConnection
     def removeDirectory(self, path):
 
+        print (f"Removing directory {path}")
         import os
         try:
             content = self.getDirectoryContent(path)
@@ -124,14 +136,16 @@ class FTPClient:
                 elif details["type"] == "file":
                     self.removeFile(os.path.join(path, name))
                 else:
-                    print (f"Skipping {path}")
+                    print (f"Skipping {os.path.join(path, name)}")
+
+            self.ftp.rmd(path)
 
         except Exception as e:
             print (f"Failed to remove directory {path}: {e} ")
             return False
 
         return True
-    
+
     @_checkConnection
     def transferFile(self, fileObj, path):
 
@@ -140,6 +154,9 @@ class FTPClient:
             self.ftp.storbinary(f"STOR {path}", fileObj)
         except Exception as e:
             print (f"Failed to transfer file {path}: {e}")
+            return False
+
+        return True
 
 
     @_checkConnection
@@ -154,6 +171,26 @@ class FTPClient:
 
         return remoteFile
 
+class DryFTPClient(FTPClient):
+
+    def __init__(self, host, user, password, port=21):
+        super(DryFTPClient, self).__init__(host, user, password, port)
+
+    def transferFile(self, fileObj, path):
+        print (f"[DRY] Transfering file {path}")
+        return True
+
+    def createDirectory(self, fileObj, path):
+        print (f"[DRY] Creating directory {path}")
+        return True
+
+    def removeFile(self, path):
+        print (f"[DRY] Removing {path} from FTP filesystem")
+        return True
+
+    def removeDirectory(self, path):
+        print (f"[DRY] Removing directory {path}")
+        return True
 
 class RemoteFile:
 

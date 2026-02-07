@@ -7,11 +7,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from ftplib import FTP
+from ftpClient import FTPClient, DryFTPClient
+from sync import Sync
 
 
 def main():
-    """Main entry point for the rsync-ftp CLI application."""
+    """Main entry point for the ftp-sync CLI application."""
     parser = argparse.ArgumentParser(
         prog='ftp-sync',
         description='Backup tool over FTP',
@@ -20,6 +21,9 @@ def main():
 Examples:
   %(prog)s --help                  Show this help message
   %(prog)s --version               Show version information
+  %(prog)s SRC DEST --host [HOST] --user [USER] --password []
+
+
         """
     )
 
@@ -31,28 +35,26 @@ Examples:
 
     parser.add_argument(
         'source',
-        nargs='?',
         help='Source directory or file to backup'
     )
 
     parser.add_argument(
         'destination',
-        nargs='?',
-        help='FTP destination (format: ftp://user:password@host/path)'
+        help='Destination directory'
     )
 
     parser.add_argument(
-        '--host',
+        'host',
         help='FTP host address'
     )
 
     parser.add_argument(
-        '--user',
+        'user',
         help='FTP username'
     )
 
     parser.add_argument(
-        '--password',
+        'password',
         help='FTP password'
     )
 
@@ -75,30 +77,73 @@ Examples:
         help='Show what would be transferred without actually doing it'
     )
 
+    parser.add_argument(
+        '--delete',
+        action='store_true',
+        help='Delete extraneous from the remote server'
+    )
+
+    parser.add_argument(
+        '--strict_match',
+        action='store_true',
+        help='Compares hashes of the entire file when matching [WARNING - unsuitable for medium or large files]'
+    )
+
+    parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='Do not compare files between source and destination. Overwrite existing files'
+    )
+
     args = parser.parse_args()
 
     # Validate arguments
-    if not args.source or not args.destination:
-        if len(sys.argv) == 1:
-            parser.print_help()
-            return 0
-        parser.error("Both source and destination are required")
+    if not args.source or not args.destination or not args.host or not args.user or not args.password:
+        parser.print_help()
+        parser.error("Source, destination, host, username and password are all required")
+        return 0
 
-    # TODO: Implement the actual backup logic
+
     if args.verbose:
         print(f"Source: {args.source}")
         print(f"Destination: {args.destination}")
-        if args.host:
-            print(f"FTP Host: {args.host}")
+        print(f"FTP Host: {args.host}")
         print(f"Dry run: {args.dry_run}")
+        print(f"Delete: {args.delete}")
 
-    print("rsync-ftp: Feature not yet implemented")
+
+    if not args.destination.startswith('/'):
+        print("WARNING - it is highly recommended to use an absolute path for the remote directory")
+
+    ftpClient = None
+
+    if args.dry_run:
+        ftpClient = DryFTPClient(args.host, args.user, args.password, args.port)
+    else:
+        ftpClient = FTPClient(args.host, args.user, args.password, args.port)
+
+    if False == ftpClient.connect():
+        print(f"Failed to connect to {args.host}")
+        return 0
+
+    syncer = Sync(ftpClient, delete = args.delete, update = not args.overwrite, strictMatch = args.strict_match)
+
+    success = False
+
+    import os
+
+    if os.path.isdir(args.source):
+        success = syncer.syncCurrentFolder(args.source, args.destination)
+    elif os.path.isfile(args.source):
+        success = syncer.syncCurrentFile(args.source, args.destination)
+    else:
+        print(f"Invalid source")
+
+    if not success:
+        return 0
+
     return 1
-
-   
 
 
 if __name__ == '__main__':
     sys.exit(main())
-
-
