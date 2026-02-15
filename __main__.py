@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ftpClient import FTPClient, DryFTPClient
 from sync import Sync
+import log
 
 
 def main():
@@ -103,14 +104,13 @@ Examples:
         parser.error("Source, destination, host, username and password are all required")
         return 0
 
-
     if args.verbose:
         print(f"Source: {args.source}")
         print(f"Destination: {args.destination}")
         print(f"FTP Host: {args.host}")
         print(f"Dry run: {args.dry_run}")
         print(f"Delete: {args.delete}")
-
+        log.setVerboseLogging(True)
 
     if not args.destination.startswith('/'):
         print("WARNING - it is highly recommended to use an absolute path for the remote directory")
@@ -133,9 +133,15 @@ Examples:
     import os
 
     if os.path.isdir(args.source):
-        success = syncer.syncCurrentFolder(args.source, args.destination)
+        counts = {'files': 0, 'dirs': 0}
+        if syncer.syncCurrentFolder(args.source, args.destination, counts):
+            print(f"Synced {counts['files']} files and {counts['dirs']} directories")
+            success = True
     elif os.path.isfile(args.source):
-        success = syncer.syncCurrentFile(args.source, args.destination)
+         if syncer.syncCurrentFile(args.source, args.destination):
+            print (f"1 File synced")
+            success = True
+
     else:
         print(f"Invalid source")
 

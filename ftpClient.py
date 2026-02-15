@@ -1,6 +1,8 @@
 
 from ftplib import FTP, error_perm
 
+from log import logA, logV
+
 class FTPClient:
     def __init__(self, host, user, password, port=21):
         self.host = host
@@ -17,27 +19,27 @@ class FTPClient:
     def _checkConnection(func):
         def wrapper(self, *args, **kwargs):
             if not self.connected:
-                print("Error: Not connected to any FTP server.")
+                logA("Error: Not connected to any FTP server.")
                 return
             return func(self, *args, **kwargs)
         return wrapper
 
     def connect(self):
-        print(f"Connecting to FTP server at {self.host}:{self.port}...")
+        logA(f"Connecting to FTP server at {self.host}:{self.port}...")
         try:
             self.ftp.connect(self.host, self.port)
         except Exception as e:
-            print(f"Failed to connect to FTP server: {e}")
+            logA(f"Failed to connect to FTP server: {e}")
             return False
 
         try:
             self.ftp.login(self.username, self.password)
         except Exception as e:
-            print(f"Failed to login: {e}")
+            logA(f"Failed to login: {e}")
             return False
 
         self.connected = True
-        print("Connected.")
+        logA("Connected.")
         return True
 
     @_checkConnection
@@ -46,7 +48,7 @@ class FTPClient:
             try:
                 self.ftp.quit()
             except Exception as e:
-                print(f"Failed to close the FTP connection{e}")
+                logV(f"Failed to close the FTP connection{e}")
                 self.ftp.close()
 
         self.connected = False
@@ -73,7 +75,7 @@ class FTPClient:
     @_checkConnection
     def getDirectoryContent(self, path):
 
-        print(f"Retrieving directory content {path}")
+        logV(f"Retrieving directory content {path}")
 
         retries = 3
 
@@ -82,7 +84,7 @@ class FTPClient:
                 files = self.ftp.mlsd(path)
                 return dict(files)
             except Exception as e:
-                print(f"Failed to retrieve directory content: {e}")
+                logA(f"Failed to retrieve directory content: {e}")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -92,7 +94,7 @@ class FTPClient:
     @_checkConnection
     def getDirectoryNames(self):
 
-        print (f"Retrieving directory names {path}")
+        logV (f"Retrieving directory names {path}")
 
         retries = 3
 
@@ -101,7 +103,7 @@ class FTPClient:
                 names = self.ftp.nlst(path)
                 return names
             except Exception as e:
-                print(f"Failed to retrieve directory content: {e}")
+                logA(f"Failed to retrieve directory names: {e}")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -111,13 +113,13 @@ class FTPClient:
     @_checkConnection
     def removeFile(self, path):
 
-        print (f"Removing {path} from FTP filesystem")
+        logV (f"Removing {path} from FTP filesystem")
 
         try:
             self.ftp.delete(path)
             return True
         except Exception as e:
-            print (f"Failed to remove file {path}: {e}")
+            logA (f"Failed to remove file {path}: {e}")
 
         return False
 
@@ -125,10 +127,10 @@ class FTPClient:
     def createDirectory(self, path, makeParents = True):
 
         if path == "/" :
-            print(f"Will not create root directory{path}")
+            logA(f"Will not create root directory{path}")
             return False
 
-        print (f"Creating directory {path}")
+        logV (f"Creating directory {path}")
         
         retries = 3
 
@@ -148,11 +150,11 @@ class FTPClient:
                         return False
 
                 else:
-                    print (f"Failed to create directory {path}: {e}")
+                    logA (f"Failed to create directory {path}: {e}")
                     return False
 
             except Exception as e:
-                print (f"Failed to create directory {path}: {e}")
+                logA (f"Failed to create directory {path}: {e}")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -165,7 +167,7 @@ class FTPClient:
     @_checkConnection
     def removeDirectory(self, path):
 
-        print (f"Removing directory {path}")
+        logV (f"Removing directory {path}")
         import os
         retries = 3
 
@@ -179,13 +181,13 @@ class FTPClient:
                     elif details["type"] == "file":
                         self.removeFile(os.path.join(path, name))
                     else:
-                        print (f"Skipping {os.path.join(path, name)}")
+                        logV (f"Skipping {os.path.join(path, name)}")
 
                 self.ftp.rmd(path)
                 return True
 
             except Exception as e:
-                print (f"Failed to remove directory {path}: {e} ")
+                logA (f"Failed to remove directory {path}: {e} ")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -197,7 +199,7 @@ class FTPClient:
     @_checkConnection
     def transferFile(self, fileObj, path):
 
-        print (f"Transfering file {path}")
+        logV (f"Transfering file {path}")
         retries = 3
 
         while retries > 0:
@@ -205,7 +207,7 @@ class FTPClient:
                 self.ftp.storbinary(f"STOR {path}", fileObj)
                 return True
             except Exception as e:
-                print (f"Failed to transfer file {path}: {e}")
+                logA (f"Failed to transfer file {path}: {e}")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -217,6 +219,7 @@ class FTPClient:
 
     @_checkConnection
     def readFile(self, path):
+        logV (f"Reading file {path}")
         remoteFile = RemoteFile()
 
         retries = 3
@@ -226,7 +229,7 @@ class FTPClient:
                 self.ftp.retrbinary('RETR '+ path, remoteFile.write)
                 return remoteFile
             except Exception as e:
-                print (f"Failed to read file {path}: {e}")
+                logA (f"Failed to read file {path}: {e}")
                 if self.isTransientError(e):
                     self.reconnect()
                     retries -= 1
@@ -241,19 +244,19 @@ class DryFTPClient(FTPClient):
         super(DryFTPClient, self).__init__(host, user, password, port)
 
     def transferFile(self, fileObj, path):
-        print (f"[DRY] Transfering file {path}")
+        logA (f"[DRY] Transfering file {path}")
         return True
 
     def createDirectory(self, fileObj, path):
-        print (f"[DRY] Creating directory {path}")
+        logA (f"[DRY] Creating directory {path}")
         return True
 
     def removeFile(self, path):
-        print (f"[DRY] Removing {path} from FTP filesystem")
+        logA (f"[DRY] Removing {path} from FTP filesystem")
         return True
 
     def removeDirectory(self, path):
-        print (f"[DRY] Removing directory {path}")
+        logA (f"[DRY] Removing directory {path}")
         return True
 
 class RemoteFile:

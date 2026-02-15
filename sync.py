@@ -4,6 +4,7 @@ import os
 from hash import hashFilePartial, hashFile
 
 from io import BytesIO
+from log import logV, logA
 
 class Sync:
     def __init__(self, ftpClient, delete = False, update = True, strictMatch = False):
@@ -15,7 +16,7 @@ class Sync:
     '''
         Syncs the content of a local folder to a folder on the FTP server
     '''
-    def syncCurrentFolder(self, local, remote):
+    def syncCurrentFolder(self, local, remote, counts = {'files': 0, 'dirs': 0}):
 
         success = True
 
@@ -35,19 +36,19 @@ class Sync:
                     if remoteEntries[localEntry.name]['type'] != 'dir':
                         # For some reason, there is a file with the same name as this directory
                         if False == self.ftpClient.removeFile(os.path.join(remote, localEntry.name)):
-                            print(f"Remote directory {localEntry.name} could not be deleted")
+                            logA(f"Remote directory {localEntry.name} could not be deleted")
                             success = False
                             continue
                 else:
                     if False == self.ftpClient.createDirectory(os.path.join(remote, localEntry.name)):
-                        print(f"Remote directory {localEntry.name} could not be created")
+                        logA(f"Remote directory {localEntry.name} could not be created")
                         success = False
                         continue
 
                     # Create a record in 'remoteEntries' for consistency
                     remoteEntries[localEntry.name] = {'type' : 'dir', 'sizd': '', 'modify': '', 'unix.mode': ''}
 
-                success = (success and self.syncCurrentFolder(localEntry.path, os.path.join(remote, localEntry.name)))
+                success = (success and self.syncCurrentFolder(localEntry.path, os.path.join(remote, localEntry.name), counts))
 
                 # For safety, mark the remote folder as "DO NOT DELETE" even if the sync failed
                 if self.delete:
@@ -61,7 +62,12 @@ class Sync:
                         # A directory with this name already exists
                         self.ftpClient.removeDirectory(remoteEntries[localEntry.name])
 
-                success = (success and self.syncCurrentFile(localEntry.path, remote, remoteEntries))
+                if self.syncCurrentFile(localEntry.path, remote, remoteEntries):
+                    counts['files'] += 1
+                else:
+                    success = False
+
+        counts['dirs'] += 1
 
         if not self.delete:
             return success
@@ -96,7 +102,7 @@ class Sync:
         try:
             file = open(local, 'rb')
         except Exception as e:
-            print(f"Could not open {local} for reading: {e}")
+            logA(f"Could not open {local} for reading: {e}")
             return False
 
         hashValue = ''
@@ -114,9 +120,9 @@ class Sync:
                 remoteFile = self.ftpClient.readFile(os.path.join(remotePath, hashName))
 
                 if remoteFile is None:
-                    print(f"Failed to read hash file for {local}")
+                    logA(f"Failed to read hash file for {local}")
                 elif remoteFile.content.decode("utf-8") == hashValue:
-                    print(f"File {local} already synced")
+                    logV(f"File {local} already synced")
                     folderContents[fileName]['Synced'] = True
                     folderContents[hashName]['Synced'] = True
                     file.close()
@@ -146,7 +152,7 @@ class Sync:
             # now write the hash file.
             hashFileBuffer = BytesIO(hashValue.encode("utf-8"))
             if not self.ftpClient.transferFile(hashFileBuffer, os.path.join(remotePath, hashName)):
-                print(f"File {local} synced, but hash file could not be created")
+                logA(f"File {local} synced, but hash file could not be created")
                 success = False
             elif not hashAlreadyExists:
                 folderContents[hashName] = {'Synced': True, 'type': 'file', 'size': '', 'modify': '',\
