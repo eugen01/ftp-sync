@@ -58,3 +58,9 @@ The tool was only tested between two ext4 filesystems.
 
 The user id , group id, permissions, etc. will all depend on the FTP user and the settings on the FTP server.\
 They will not be the same as the local files.\
+
+3. Python's ftplib can open too many connections
+
+I couldn't find out exactly what's happening, but when processing a large number of files the server would\
+sometimes respond with "421 - Too many open files".\
+I tried multiple methods to mitigate this but I couldn't find one that works other than restarting the connection.

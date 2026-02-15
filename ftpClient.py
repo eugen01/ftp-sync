@@ -52,29 +52,61 @@ class FTPClient:
         self.connected = False
         self.ftp = None
 
+    '''
+        Checks if an error code returned by the server is a 'Transient Negative Completion' reply
+        These errors indicate a temporary issue and the command can be retried.
+    '''
+    def isTransientError(self, error):
+        try:
+            errorMessage = str(error)[:3]
+            return errorMessage.startswith("4")
+        except Exception as e:
+            # Error message is smaller than 3 characters or not a string.
+            return False
+
+    @_checkConnection
+    def reconnect(self):
+        self.disconnect()
+        self.ftp = FTP()
+        return self.connect()
+
     @_checkConnection
     def getDirectoryContent(self, path):
 
         print(f"Retrieving directory content {path}")
-        try:
 
-            files = self.ftp.mlsd(path)
-            return dict(files)
-        except Exception as e:
-            print(f"Failed to retrieve directory content: {e}")
-            return None
+        retries = 3
+
+        while retries > 0:
+            try:
+                files = self.ftp.mlsd(path)
+                return dict(files)
+            except Exception as e:
+                print(f"Failed to retrieve directory content: {e}")
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
+                else:
+                    return None
 
     @_checkConnection
     def getDirectoryNames(self):
 
         print (f"Retrieving directory names {path}")
 
-        try:
-            names = self.ftp.nlst(path)
-            return names
-        except Exception as e:
-            print(f"Failed to retrieve directory content: {e}")
-            return None
+        retries = 3
+
+        while retries > 0:
+            try:
+                names = self.ftp.nlst(path)
+                return names
+            except Exception as e:
+                print(f"Failed to retrieve directory content: {e}")
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
+                else:
+                    return None
 
     @_checkConnection
     def removeFile(self, path):
@@ -97,27 +129,35 @@ class FTPClient:
             return False
 
         print (f"Creating directory {path}")
-        try:
-            self.ftp.mkd(path)
-        except error_perm as permError:
-            if str(permError).startswith("550") and True == makeParents:
-                import os
-                head, tail = os.path.split(path)
-                if not tail:
-                    head = os.path.dirname(head)
+        
+        retries = 3
 
-                if True == self.createDirectory(head, True):
-                    return self.createDirectory(path, False)
+        while retries > 0:
+            try:
+                self.ftp.mkd(path)
+            except error_perm as permError:
+                if str(permError).startswith("550") and True == makeParents:
+                    import os
+                    head, tail = os.path.split(path)
+                    if not tail:
+                        head = os.path.dirname(head)
+
+                    if True == self.createDirectory(head, True):
+                        return self.createDirectory(path, False)
+                    else:
+                        return False
+
                 else:
+                    print (f"Failed to create directory {path}: {e}")
                     return False
 
-            else:
+            except Exception as e:
                 print (f"Failed to create directory {path}: {e}")
-                return False
-
-        except Exception as e:
-            print (f"Failed to create directory {path}: {e}")
-            return False
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
+                else:
+                    return False
 
         return True
 
@@ -127,22 +167,30 @@ class FTPClient:
 
         print (f"Removing directory {path}")
         import os
-        try:
-            content = self.getDirectoryContent(path)
+        retries = 3
 
-            for name, details in content.items():
-                if details["type"] == "dir":
-                    self.removeDirectory(os.path.join(path, name))
-                elif details["type"] == "file":
-                    self.removeFile(os.path.join(path, name))
+        while retries > 0:
+            try:
+                content = self.getDirectoryContent(path)
+
+                for name, details in content.items():
+                    if details["type"] == "dir":
+                        self.removeDirectory(os.path.join(path, name))
+                    elif details["type"] == "file":
+                        self.removeFile(os.path.join(path, name))
+                    else:
+                        print (f"Skipping {os.path.join(path, name)}")
+
+                self.ftp.rmd(path)
+                return True
+
+            except Exception as e:
+                print (f"Failed to remove directory {path}: {e} ")
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
                 else:
-                    print (f"Skipping {os.path.join(path, name)}")
-
-            self.ftp.rmd(path)
-
-        except Exception as e:
-            print (f"Failed to remove directory {path}: {e} ")
-            return False
+                    return False
 
         return True
 
@@ -150,11 +198,19 @@ class FTPClient:
     def transferFile(self, fileObj, path):
 
         print (f"Transfering file {path}")
-        try:
-            self.ftp.storbinary(f"STOR {path}", fileObj)
-        except Exception as e:
-            print (f"Failed to transfer file {path}: {e}")
-            return False
+        retries = 3
+
+        while retries > 0:
+            try:
+                self.ftp.storbinary(f"STOR {path}", fileObj)
+                return True
+            except Exception as e:
+                print (f"Failed to transfer file {path}: {e}")
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
+                else:
+                    return False
 
         return True
 
@@ -163,11 +219,19 @@ class FTPClient:
     def readFile(self, path):
         remoteFile = RemoteFile()
 
-        try:
-            self.ftp.retrbinary('RETR '+ path, remoteFile.write)
-        except Exception as e:
-            print (f"Failed to read file {path}: {e}")
-            return None
+        retries = 3
+
+        while retries > 0:
+            try:
+                self.ftp.retrbinary('RETR '+ path, remoteFile.write)
+                return remoteFile
+            except Exception as e:
+                print (f"Failed to read file {path}: {e}")
+                if self.isTransientError(e):
+                    self.reconnect()
+                    retries -= 1
+                else:
+                    return None
 
         return remoteFile
 
