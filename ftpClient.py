@@ -138,7 +138,13 @@ class FTPClient:
             try:
                 self.ftp.mkd(path)
             except error_perm as permError:
-                if str(permError).startswith("550") and True == makeParents:
+                if str(permError).startswith("550"):
+                    if str(permError).endswith("File exists"):
+                        logV (f"Directory {path} already exists")
+                        return True
+                    if false == makeParents:
+                        logA (f"Parent directory of {path} does not exist")
+                        return False
                     import os
                     head, tail = os.path.split(path)
                     if not tail:
