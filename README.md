@@ -16,7 +16,7 @@ The file stores a partial or complete hash of the file, and this is used to comp
 The hash is generated from the first and last 8192 bytes in the file. If the file is smaller than
 16384 bytes, it is hased entirely.\
 Obviously, this isn't a perfect hashing method, and for some files it may result in false matches.\
-That's where the 'strict_match' and 'overwrite' options come in. 
+That's where the 'strict_match' and 'overwrite' options come in.
 
 USAGE
 -----
@@ -44,11 +44,21 @@ ftp-sync supports the following options:
     Hash files will not be stored on the server. If they are already there, and 'delete' isn't used, they may interfere with future syncs
 
 
+INSTALLATION
+-----------
+
+ftp-sync can be installed by running:
+
+    pyinstaller -n ftp-sync __main__.py
+
+pyinstaller can be installed using pip or by running:
+
+    apt install python3-pyinstaller
 
 LIMITATIONS
 -----------
 
-1. There are possible issues when using different filesystems between local and remote. 
+1. There are possible issues when using different filesystems between local and remote.
 
 For example, the tool uses os.path.join to create paths to be used on the remote filesystem.\
 This is technically incorrect, since the 'os' module is only valid for the operating system where it's being used.\
